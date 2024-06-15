@@ -115,6 +115,8 @@ std::vector<TrajectoryPoint> VelocityProfileGenerator::decelerate_trajectory(
   perform a smooth deceleration and require a harder deceleration.  Build the path
   up in reverse to ensure we reach zero speed at the required time.
   */
+  // Caculate min acceleration requried to stop
+  double req_acc = (start_speed * start_speed) / (2 * path_length);
   if (brake_distance + decel_distance > path_length) {
     std::vector<double> speeds;
     auto vf{0.0};
@@ -126,7 +128,7 @@ std::vector<TrajectoryPoint> VelocityProfileGenerator::decelerate_trajectory(
     // Let's now go backwards until we get to the very beginning of the path
     for (int i = stop_index - 1; i >= 0; --i) {
       auto dist = utils::distance(spiral[i + 1], spiral[i]);
-      auto vi = calc_final_speed(vf, -_a_max, dist);
+      auto vi = calc_final_speed(vf, -req_acc, dist);
       if (vi > start_speed) {
         vi = start_speed;
       }
@@ -138,24 +140,25 @@ std::vector<TrajectoryPoint> VelocityProfileGenerator::decelerate_trajectory(
 
     // At this point we have all the speeds. Now we need to create the
     // trajectory
+    
     double time_step{0.0};
     double time{0.0};
-    for (size_t i = 0; i < speeds.size() - 1; ++i) {
+    for (size_t i = 0; i <= speeds.size() - 1; ++i) {
       TrajectoryPoint traj_point;
       traj_point.path_point = spiral[i];
       traj_point.v = speeds[i];
       traj_point.relative_time = time;
       trajectory.push_back(traj_point);
-      time_step = std::fabs(speeds[i] - speeds[i + 1]) / _a_max;  // Doubt! This is not correct. You should calculate timestep upfront based on the last two speed.
+      time_step = std::fabs(speeds[i] - speeds[i + 1]) / req_acc;  // Doubt! This is not correct. You should calculate timestep upfront based on the last two speed.
       time += time_step;
     }
     // We still need to add the last one
-    auto i = spiral.size() - 1;
-    TrajectoryPoint traj_point;
-    traj_point.path_point = spiral[i];
-    traj_point.v = speeds[i];
-    traj_point.relative_time = time;
-    trajectory.push_back(traj_point);
+    // auto i = spiral.size() - 1;
+    // TrajectoryPoint traj_point;
+    // traj_point.path_point = spiral[i];
+    // traj_point.v = speeds[i];
+    // traj_point.relative_time = time;
+    // trajectory.push_back(traj_point);
 
     // If the brake distance DOES NOT exceed the length of the path
   } else {
@@ -175,7 +178,7 @@ std::vector<TrajectoryPoint> VelocityProfileGenerator::decelerate_trajectory(
           utils::distance(spiral[decel_index + 1], spiral[decel_index]);
       ++decel_index;
     }
-    // At this point we have all the speeds. Now we need to create the
+    // At this point we have all the distances. Now we need to create the
     // trajectory
     double time_step{0.0};
     double time{0.0};
@@ -235,9 +238,8 @@ std::vector<TrajectoryPoint> VelocityProfileGenerator::decelerate_trajectory(
 // Computes a velocity trajectory for following a lead vehicle
 std::vector<TrajectoryPoint> VelocityProfileGenerator::follow_trajectory(
     const std::vector<PathPoint>& spiral, const double& start_speed,
-    const double& desired_speed, const State& lead_car_state) const {
-  std::vector<TrajectoryPoint> trajectory;
-  return trajectory;
+    const double& desired_speed, const State& lead_car_state) const {    
+  return nominal_trajectory(spiral, start_speed, magnitude(lead_car_state.velocity));
 }
 
 // Computes a velocity trajectory for nominal speed tracking, a.k.a. Lane Follow
