@@ -146,7 +146,7 @@ std::vector<TrajectoryPoint> VelocityProfileGenerator::decelerate_trajectory(
       traj_point.v = speeds[i];
       traj_point.relative_time = time;
       trajectory.push_back(traj_point);
-      time_step = std::fabs(speeds[i] - speeds[i + 1]) / _a_max;  // Doubt!
+      time_step = std::fabs(speeds[i] - speeds[i + 1]) / _a_max;  // Doubt! This is not correct. You should calculate timestep upfront based on the last two speed.
       time += time_step;
     }
     // We still need to add the last one
@@ -362,7 +362,7 @@ double VelocityProfileGenerator::calc_distance(const double& v_i,
     // v_i (initial velocity) to v_f (final velocity) at a constant
     // acceleration/deceleration "a". HINT look at the description of this
     // function. Make sure you handle div by 0
-    d = 0;  // <- Update
+    d = std::fabs((v_f * v_f - v_i * v_i) / (2 * a));  // <- Update
   }
   return d;
 }
@@ -385,7 +385,7 @@ double VelocityProfileGenerator::calc_final_speed(const double& v_i,
   // and make v_f = 0 in that case. If the discriminant is inf or nan return
   // infinity
 
-  double disc = 0;  // <- Fix this
+  double disc = v_i * v_i + 2 * a * d;  // <- Fix this
   if (disc <= 0.0) {
     v_f = 0.0;
   } else if (disc == std::numeric_limits<double>::infinity() ||
