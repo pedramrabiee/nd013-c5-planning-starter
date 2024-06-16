@@ -90,7 +90,7 @@ double logistic(double x) {
   /*
   A function that returns a value between 0 and 1 for x in the
   range[0, infinity] and -1 to 1 for x in the range[-infinity, infinity].
-
+  This is just equals to tanh(x/2)
   Useful for cost functions.
   */
 
