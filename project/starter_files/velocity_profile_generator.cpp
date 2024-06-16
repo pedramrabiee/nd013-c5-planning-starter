@@ -239,7 +239,7 @@ std::vector<TrajectoryPoint> VelocityProfileGenerator::decelerate_trajectory(
 std::vector<TrajectoryPoint> VelocityProfileGenerator::follow_trajectory(
     const std::vector<PathPoint>& spiral, const double& start_speed,
     const double& desired_speed, const State& lead_car_state) const {    
-  return nominal_trajectory(spiral, start_speed, magnitude(lead_car_state.velocity));
+  return nominal_trajectory(spiral, start_speed, utils::magnitude(lead_car_state.velocity));
 }
 
 // Computes a velocity trajectory for nominal speed tracking, a.k.a. Lane Follow

@@ -10,13 +10,34 @@
 
 #include "behavior_planner_FSM.h"
 
+/**
+ * Determines a goal waypoint for behavior planning based on the vehicle's current state and a calculated lookahead distance.
+ *
+ * Despite its name, this function does not return the physically closest waypoint. Instead, it aims to identify a suitable
+ * waypoint ahead of the vehicle to serve as a goal for the current planning cycle. The function works as follows:
+ *
+ * 1. If the vehicle is in a stopping maneuver (DECEL_TO_STOP or STOPPED), it returns the nearest waypoint to the current position.
+ * 2. Otherwise, it calculates a lookahead distance based on the vehicle's current speed and maximum comfortable deceleration.
+ * 3. It then retrieves a list of waypoints along the current lane up to this lookahead distance.
+ * 4. From this list, it selects the farthest waypoint (i.e., the one closest to the lookahead distance) as the goal.
+ * 5. It checks if this goal waypoint is in a junction (intersection) and determines whether this junction should be considered new 
+ *    (different from the current junction, if any).
+ * 6. Finally, it returns the state (location and orientation) of the selected goal waypoint.
+ *
+ * The rationale for choosing the farthest waypoint within the lookahead distance is to:
+ * - Provide a stable, medium-term goal that encourages smooth trajectories.
+ * - Allow anticipation of upcoming road features (turns, junctions, etc.).
+ * - Set a goal point appropriate to the current speed (faster speeds yield farther goals).
+ */
+
 State BehaviorPlannerFSM::get_closest_waypoint_goal(
     const State& ego_state, const SharedPtr<cc::Map>& map,
-    const float& lookahead_distance, bool& is_goal_junction) {
+    const float& lookahead_distance, bool& is_goal_junction) {      
   // Nearest waypoint on the center of a Driving Lane.
   auto waypoint_0 = map->GetWaypoint(ego_state.location);
 
   if (_active_maneuver == DECEL_TO_STOP || _active_maneuver == STOPPED) {
+    // return the nearest waypoint in this case
     State waypoint;
     auto wp_transform = waypoint_0->GetTransform();
     waypoint.location = wp_transform.location;
@@ -34,18 +55,24 @@ State BehaviorPlannerFSM::get_closest_waypoint_goal(
   // NOTE 2: GetNextUntilLaneEnd(d) returns a list of waypoints a distance "d"
   // apart. The list goes from the current waypoint to the end of its
   // lane.
-
+  
   auto lookahead_waypoints = waypoint_0->GetNext(lookahead_distance);
   auto n_wp = lookahead_waypoints.size();
   if (n_wp == 0) {
+    // No waypoint in the look ahead
     // LOG(INFO) << "Goal wp is a nullptr";
     State waypoint;
     return waypoint;
   }
   // LOG(INFO) << "BP - Num of Lookahead waypoints: " << n_wp;
-
+  
+  // Farthest waypoint: By choosing the last waypoint in the lookahead_waypoints list,
+  // the function is essentially picking a point that's approximately at the calculated 
+  // lookahead distance ahead of the vehicle. This point serves as a short-term to
+  //  medium-term goal for the vehicle to drive towards.
   waypoint_0 = lookahead_waypoints[lookahead_waypoints.size() - 1];
-
+  
+  // Check if the waypoint is in junction (intersection, roundabout, etc.)
   is_goal_junction = waypoint_0->IsJunction();
   // LOG(INFO) << "BP - Is Last wp in junction? (0/1): " << is_goal_junction;
   auto cur_junction_id = waypoint_0->GetJunctionId();
@@ -72,12 +99,12 @@ State BehaviorPlannerFSM::get_closest_waypoint_goal(
 
 double BehaviorPlannerFSM::get_look_ahead_distance(const State& ego_state) {
   auto velocity_mag = utils::magnitude(ego_state.velocity);
-  auto accel_mag = utils::magnitude(ego_state.acceleration);
+  // auto accel_mag = utils::magnitude(ego_state.acceleration);
 
   // TODO-Lookahead: One way to find a reasonable lookahead distance is to find
   // the distance you will need to come to a stop while traveling at speed V and
   // using a comfortable deceleration.
-  auto look_ahead_distance = 1.0;  // <- Fix This
+  auto look_ahead_distance = (velocity_mag * velocity_mag) / (2 * 0.8 * _max_accel);  // <- Fix This
 
   // LOG(INFO) << "Calculated look_ahead_distance: " << look_ahead_distance;
 
@@ -139,24 +166,24 @@ State BehaviorPlannerFSM::state_transition(const State& ego_state, State goal,
       // use cosine and sine to get x and y
       //
       auto ang = goal.rotation.yaw + M_PI;
-      goal.location.x += 1.0;  // <- Fix This
-      goal.location.y += 1.0;  // <- Fix This
+      goal.location.x += _stop_line_buffer * std::cos(ang);  // <- Fix This
+      goal.location.y += _stop_line_buffer * std::sin(ang);  // <- Fix This
 
       // LOG(INFO) << "BP- new STOP goal at: " << goal.location.x << ", "
       //          << goal.location.y;
 
       // TODO-goal speed at stopping point: What should be the goal speed??
-      goal.velocity.x = 1.0;  // <- Fix This
-      goal.velocity.y = 1.0;  // <- Fix This
-      goal.velocity.z = 1.0;  // <- Fix This
+      goal.velocity.x = 0.0;  // <- Fix This
+      goal.velocity.y = 0.0;  // <- Fix This
+      goal.velocity.z = 0.0;  // <- Fix This
 
     } else {
       // TODO-goal speed in nominal state: What should be the goal speed now
       // that we know we are in nominal state and we can continue freely?
       // Remember that the speed is a vector
       // HINT: _speed_limit * std::sin/cos (goal.rotation.yaw);
-      goal.velocity.x = 1.0;  // <- Fix This
-      goal.velocity.y = 1.0;  // <- Fix This
+      goal.velocity.x = _speed_limit * std::cos(goal.rotation.yaw);  // <- Fix This
+      goal.velocity.y = _speed_limit * std::sin(goal.rotation.yaw);  // <- Fix This
       goal.velocity.z = 0;
     }
 
@@ -165,7 +192,7 @@ State BehaviorPlannerFSM::state_transition(const State& ego_state, State goal,
     // TODO-maintain the same goal when in DECEL_TO_STOP state: Make sure the
     // new goal is the same as the previous goal (_goal). That way we
     // keep/maintain the goal at the stop line.
-       //goal = ;  // <- Fix This
+    goal = _goal;  // <- Fix This
 
     // TODO: It turns out that when we teleport, the car is always at speed
     // zero. In this the case, as soon as we enter the DECEL_TO_STOP state,
@@ -180,12 +207,12 @@ State BehaviorPlannerFSM::state_transition(const State& ego_state, State goal,
     // LOG(INFO) << "Ego distance to stop line: " << distance_to_stop_sign;
 
     // TODO-use distance rather than speed: Use distance rather than speed...
-    if (utils::magnitude(ego_state.velocity) <=
-        _stop_threshold_speed) {  // -> Fix this
-      // if (distance_to_stop_sign <= P_STOP_THRESHOLD_DISTANCE) {
+    // if (utils::magnitude(ego_state.velocity) <=
+    //     _stop_threshold_speed) {  // -> Fix this    
+    if (distance_to_stop_sign <= P_STOP_THRESHOLD_DISTANCE) {
       // TODO-move to STOPPED state: Now that we know we are close or at the
       // stopping point we should change state to "STOPPED"
-      //_active_maneuver = ;  // <- Fix This
+      _active_maneuver = STOPPED;  // <- Fix This
       _start_stop_time = std::chrono::high_resolution_clock::now();
       // LOG(INFO) << "BP - changing to STOPPED";
     }
@@ -205,7 +232,7 @@ State BehaviorPlannerFSM::state_transition(const State& ego_state, State goal,
     if (stopped_secs >= _req_stop_time && tl_state.compare("Red") != 0) {
       // TODO-move to FOLLOW_LANE state: What state do we want to move to, when
       // we are "done" at the STOPPED state?
-      //_active_maneuver = ;  // <- Fix This
+      _active_maneuver = FOLLOW_LANE;  // <- Fix This
       // LOG(INFO) << "BP - changing to FOLLOW_LANE";
     }
   }
